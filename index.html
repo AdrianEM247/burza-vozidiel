@@ -199,7 +199,7 @@ button{cursor:pointer}
       <div class="field-label">Predajné miesto</div>
       <select id="dealerSelect" onchange="onDealerPick()"><option value="">Vyber svoje predajné miesto…</option></select>
       <div class="field-label" style="margin-top:12px">Prístupový kód</div>
-      <input id="codeInput" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="4-miestny kód" onkeydown="if(event.key==='Enter')login()">
+      <input id="codeInput" type="password" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="4-miestny kód" onkeydown="if(event.key==='Enter')login()">
       <p class="login-err hidden" id="loginErr">Nesprávny kód pre toto predajné miesto.</p>
       <button class="btn-login" id="btnLogin" onclick="login()">Vstúpiť do burzy</button>
       <p class="login-note">Kód dostalo každé predajné miesto od Grand Automotive. Ponúkni auto, ktoré ti stojí na sklade — alebo si nájdi to, ktoré ti chýba. Presun sa následne rieši štandardne cez DIGLAS.</p>
@@ -425,11 +425,20 @@ function seedDemo(){
 }
 
 /* ---------- LOGIN ---------- */
+/* Zapamätaný kód platí 30 dní, potom ho treba zadať znova */
+const KOD_PLATNOST = 30*86400000;
+function savedCode(dealer){
+  try{
+    const raw=store('burza_kod_'+dealer); if(!raw) return '';
+    const o=JSON.parse(raw);
+    if(!o || !o.c || (Date.now()-(o.t||0))>KOD_PLATNOST){ localStorage.removeItem('burza_kod_'+dealer); return ''; }
+    return o.c;
+  }catch(e){ try{ localStorage.removeItem('burza_kod_'+dealer); }catch(e2){} return ''; }
+}
 function onDealerPick(){
   const v=$('dealerSelect').value;
   $('loginErr').classList.add('hidden');
-  const saved=store('burza_kod_'+v);
-  $('codeInput').value = saved||'';
+  $('codeInput').value = v ? savedCode(v) : '';
 }
 function login(){
   const v=$('dealerSelect').value;
@@ -441,7 +450,7 @@ function login(){
     return;
   }
   $('loginErr').classList.add('hidden');
-  store('burza_kod_'+v,code);
+  store('burza_kod_'+v,JSON.stringify({c:code,t:Date.now()}));
   me=v; store('burza_dealer',v);
   $('whoLabel').textContent = v==='ADMIN' ? 'Grand Automotive · importér' : dLabel(v);
   $('loginScreen').classList.add('hidden'); $('app').classList.remove('hidden');
