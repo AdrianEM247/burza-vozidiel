@@ -863,18 +863,19 @@ async function odosliMail(p){
   const {subject,body}=presunText(p);
   if(DEMO) return 'odoslany';          /* v náhľade neotvárame poštového klienta */
   if(!MAIL_ENDPOINT){ mailtoOtvor(subject,body); return 'manualne'; }
+  /* Apps Script pri presmerovaní neposiela CORS hlavičky, takže odpoveď sa prečítať nedá.
+     Posielame preto „no-cors" — požiadavka prejde, odpoveď je zámerne neviditeľná.
+     Keď je doména blokovaná alebo sieť nefunguje, fetch spadne a otvorí sa Outlook. */
   try{
     const ctrl=new AbortController();
     const t=setTimeout(()=>ctrl.abort(),8000);
-    const r=await fetch(MAIL_ENDPOINT,{
-      method:'POST', signal:ctrl.signal, redirect:'follow',
+    await fetch(MAIL_ENDPOINT,{
+      method:'POST', mode:'no-cors', signal:ctrl.signal, redirect:'follow',
       headers:{'Content-Type':'text/plain;charset=utf-8'},
       body:JSON.stringify({subject,body,to:LOGISTIKA_MAIL,cc:KOPIA_MAIL})
     });
     clearTimeout(t);
-    const txt=await r.text();
-    if(r.ok && txt.indexOf('"ok"')>-1) return 'odoslany';
-    throw new Error('odpoved: '+txt.slice(0,120));
+    return 'odoslany';
   }catch(e){
     mailtoOtvor(subject,body);
     return 'manualne';
