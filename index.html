@@ -861,7 +861,7 @@ function mailtoOtvor(subject,body){
 /* Skúsi odoslať cez Apps Script; keď sa to nepodarí, otvorí predvyplnený mail. */
 async function odosliMail(p){
   const {subject,body}=presunText(p);
-  if(DEMO) return 'odoslany';          /* v náhľade neotvárame poštového klienta */
+  if(DEMO) return 'manualne';          /* v náhľade ukážeme rovnaké okno ako naostro */
   if(!MAIL_ENDPOINT){ mailtoOtvor(subject,body); return 'manualne'; }
   /* Apps Script pri presmerovaní neposiela CORS hlavičky, takže odpoveď sa prečítať nedá.
      Posielame preto „no-cors" — požiadavka prejde, odpoveď je zámerne neviditeľná.
@@ -877,9 +877,48 @@ async function odosliMail(p){
     clearTimeout(t);
     return 'odoslany';
   }catch(e){
-    mailtoOtvor(subject,body);
     return 'manualne';
   }
+}
+
+/* Keď mail neodchádza automaticky: ukážeme dílerovi hotový text.
+   Outlook si otvorí tlačidlom, webmail obslúži cez „Skopírovať text". */
+function openMailPomoc(p){
+  const {subject,body}=presunText(p);
+  window.__mail={subject,body};
+  modal('Presun je nahlásený — ešte pošli mail',`
+    <div class="note-box" style="border-left-color:var(--green)">
+      Záznam o presune je uložený a ${esc(LOGISTIKA_MENO)} ho vidí v prehľade presunov.
+      <strong>Ešte jej, prosím, pošli tento mail</strong> — nech o tom vie hneď.
+    </div>
+    <dl class="kv">
+      <dt>Komu</dt><dd class="mono" style="font-size:12.5px">${esc(LOGISTIKA_MAIL)}</dd>
+      <dt>Kópia</dt><dd class="mono" style="font-size:12.5px">${esc(KOPIA_MAIL)}</dd>
+    </dl>
+    <div class="fld"><label>Predmet</label><input id="mSubj" readonly value="${esc(subject)}"></div>
+    <div class="fld"><label>Text mailu</label>
+      <textarea id="mBody" readonly style="min-height:180px;font-size:13px;line-height:1.5">${esc(body)}</textarea></div>
+    <p style="font-size:12.5px;color:var(--muted);line-height:1.55">
+      Máš Outlook? Klikni <strong>Otvoriť v pošte</strong> — mail sa predvyplní sám.
+      Používaš poštu cez prehliadač? Daj <strong>Skopírovať text</strong> a vlož ho do nového mailu.</p>
+  `,`<button class="btn-ghost" onclick="kopirujMail()">Skopírovať text</button>
+     <button class="btn-ghost" onclick="mailtoOtvor(window.__mail.subject,window.__mail.body)">Otvoriť v pošte</button>
+     <button class="btn-primary" onclick="closeModal()">Hotovo</button>`);
+}
+
+function kopirujMail(){
+  const t=`Komu: ${LOGISTIKA_MAIL}\nKópia: ${KOPIA_MAIL}\nPredmet: ${window.__mail.subject}\n\n${window.__mail.body}`;
+  const hotovo=()=>toast('Text skopírovaný — vlož ho do nového mailu');
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(t).then(hotovo).catch(()=>vybrTextom(t,hotovo));
+  } else vybrTextom(t,hotovo);
+}
+function vybrTextom(t,hotovo){
+  const ta=document.createElement('textarea');
+  ta.value=t; ta.style.position='fixed'; ta.style.opacity='0';
+  document.body.appendChild(ta); ta.select();
+  try{ document.execCommand('copy'); hotovo(); }catch(e){ toast('Skopíruj text ručne z okna'); }
+  document.body.removeChild(ta);
 }
 
 async function savePresun(id){
@@ -907,8 +946,8 @@ async function savePresun(id){
     db.ref(NODE+'/ponuka/'+id).update({status:'dohodnute', preDealer:pre, dohodnuteAt:p.createdAt});
   }
   closeModal(); render();
-  toast(stav==='odoslany' ? 'Presun nahlásený, mail odišiel na logistiku'
-                          : 'Presun zapísaný — dopíš a pošli otvorený mail');
+  if(stav==='odoslany'){ toast('Presun nahlásený, mail odišiel na logistiku'); }
+  else { openMailPomoc(p); }
 }
 
 /* ---------- PRESUNY: prehľad pre logistiku a importéra ---------- */
