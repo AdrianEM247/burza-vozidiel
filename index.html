@@ -232,8 +232,9 @@ button{cursor:pointer}
         <button id="tab-burza" class="on" onclick="setTab('burza')">Burza <span class="count" id="cnt-burza">0</span></button>
         <button id="tab-dopyt" onclick="setTab('dopyt')">Hľadám <span class="count" id="cnt-dopyt">0</span></button>
         <button id="tab-moje" onclick="setTab('moje')">Moje <span class="count" id="cnt-moje">0</span></button>
+        <button id="tab-presuny" class="hidden" onclick="setTab('presuny')">Presuny <span class="count" id="cnt-presuny">0</span></button>
       </div>
-      <div style="display:flex;gap:9px;flex-wrap:wrap">
+      <div id="dealerActions" style="display:flex;gap:9px;flex-wrap:wrap">
         <button class="btn-ghost" onclick="openWant()">+ Hľadám auto</button>
         <button class="btn-primary" onclick="openOffer()">+ Ponúknuť vozidlo</button>
       </div>
@@ -342,12 +343,20 @@ const CODES = {
   OSK0040:'6693', OSK0050:'5017', OSK0060:'8281', OSK0080:'6465', OSK0090:'3194',
   OSK0100:'9270', OSK0110:'9446', OSK0120:'3032', OSK0130:'4467', OSK0140:'4722',
   OSK0150:'7741', OSK0151:'1303', OSK0160:'5461', OSK0170:'7628', OSK0180:'5508',
-  OSK0190:'2090', OSK0200:'2917', OSK0210:'5307', ADMIN:'9111'
+  OSK0190:'2090', OSK0200:'2917', OSK0210:'5307', ADMIN:'9111', LOGISTIKA:'4180'
 };
+
+/* Hlásenie presunov na logistiku */
+const LOGISTIKA_MENO  = 'Veronika Janečková';
+const LOGISTIKA_MAIL  = 'vjaneckova@grandautomotive.sk';
+const KOPIA_MAIL      = 'amarkusek@grandautomotive.sk';
+/* Odosielač mailov (Google Apps Script web app). Prázdne = appka rovno otvorí
+   predvyplnený mail v poštovom klientovi dílera. */
+const MAIL_ENDPOINT   = '';
 
 /* ---------- STATE ---------- */
 let db=null, DEMO=false, isAdmin=false, me=null;
-let offers={}, wants={}, photos={};
+let offers={}, wants={}, photos={}, presuny={};
 let tab='burza';
 let filter={model:'',type:'',trim:'',dealer:'',q:''};
 
@@ -378,8 +387,9 @@ function boot(){
   Object.keys(DEALERS).sort().forEach(c=>{
     const o=document.createElement('option'); o.value=c; o.textContent=`${DEALERS[c].name} — ${DEALERS[c].city} (${c})`; sel.appendChild(o);
   });
+  const ol=document.createElement('option'); ol.value='LOGISTIKA'; ol.textContent='Grand Automotive — logistika'; sel.appendChild(ol);
   if(isAdmin){ const o=document.createElement('option'); o.value='ADMIN'; o.textContent='⚙ Grand Automotive (importér)'; sel.appendChild(o); }
-  const saved=store('burza_dealer'); if(saved && (DEALERS[saved]||saved==='ADMIN')) sel.value=saved;
+  const saved=store('burza_dealer'); if(saved && CODES[saved]) sel.value=saved;
   onDealerPick();
 
   ALL_TYPES.forEach(t=>{ const o=document.createElement('option'); o.value=t; o.textContent=t; $('fType').appendChild(o); });
@@ -400,6 +410,7 @@ function initData(){
     firebase.initializeApp(FB_CONFIG); db=firebase.database();
     db.ref(NODE+'/ponuka').on('value',s=>{ offers=s.val()||{}; render(); });
     db.ref(NODE+'/dopyt').on('value',s=>{ wants=s.val()||{}; render(); });
+    db.ref(NODE+'/presuny').on('value',s=>{ presuny=s.val()||{}; render(); });
   }catch(e){
     DEMO=true; $('demoBanner').classList.remove('hidden');
     seedDemo();
@@ -417,6 +428,17 @@ function seedDemo(){
     a7:{dealer:'OSK0170',model:'JAECOO 8',typ:'PHEV',motor:'1.5 TGDI',vybava:'Exclusive',interier:'Brown',farba:'Khaki White',vin:'LJ1BBEGG7TC300471',stav:'Nové',km:0,skladOd:d(112),poznamka:'Sedemmiestny, hnedý interiér. Vieme dohodnúť aj dovoz k vám.',kontakt:'Roman Danko',telefon:'+421 905 660 118',status:'aktivne',createdAt:d(5),foto:0},
     a5:{dealer:'OSK0100',model:'OMODA 7',typ:'ICE',motor:'1.6 tGDI',vybava:'Premium',interier:'Black',farba:'Misty Green',vin:'LVVDB21B4TC201118',stav:'Nové',km:0,skladOd:d(24),poznamka:'',kontakt:'Zoltán Nagy',telefon:'+421 911 605 072',status:'aktivne',createdAt:d(4),foto:0}
   };
+  presuny={
+    p1:{vin:'LVVDB21B4TC200884',model:'OMODA 7',typ:'ICE',motor:'1.6 tGDI',vybava:'Premium',interier:'Black',farba:'Matte Gray',
+        stav:'Nové',km:0,skladOd:d(130),odDealer:'OSK0110',odKontakt:'Martina Kováčová',odTelefon:'+421 907 441 208',
+        preDealer:'OSK0060',preKontakt:'Jozef Slota, +421 905 880 311',poznamka:'Dopravu si zabezpečíme sami, auto vieme odovzdať budúci týždeň.',
+        createdAt:new Date(Date.now()-2*86400000).toISOString(),mailStav:'odoslany'}
+  };
+  /* v náhľade sprístupním aj rolu importéra, nech sa dá pozrieť záložka Presuny */
+  const sel=$('dealerSelect');
+  if(!Array.from(sel.options).some(o=>o.value==='ADMIN')){
+    const o=document.createElement('option'); o.value='ADMIN'; o.textContent='⚙ Grand Automotive (importér)'; sel.appendChild(o);
+  }
   wants={
     w1:{dealer:'OSK0010',model:'OMODA 9',typ:'PHEV',vybava:'Premium',farba:'Black Knight',poznamka:'Zákazník čaká, vzali by sme aj Tech gray. Platba ihneď.',kontakt:'Ján Balog',telefon:'+421 902 447 118',createdAt:d(3)},
     w2:{dealer:'OSK0190',model:'JAECOO 7',typ:'HEV',vybava:'',farba:'',poznamka:'Čokoľvek v HEV, potrebujeme na predvádzanie do konca mesiaca.',kontakt:'Lukáš Chren',telefon:'+421 949 003 260',createdAt:d(11)}
@@ -452,17 +474,29 @@ function login(){
   $('loginErr').classList.add('hidden');
   store('burza_kod_'+v,JSON.stringify({c:code,t:Date.now()}));
   me=v; store('burza_dealer',v);
-  $('whoLabel').textContent = v==='ADMIN' ? 'Grand Automotive · importér' : dLabel(v);
+  $('whoLabel').textContent = v==='ADMIN' ? 'Grand Automotive · importér'
+    : v==='LOGISTIKA' ? LOGISTIKA_MENO+' · logistika' : dLabel(v);
   $('loginScreen').classList.add('hidden'); $('app').classList.remove('hidden');
-  render();
+  applyRole();
+  setTab(isLogistika() ? 'presuny' : 'burza');
 }
 function logout(){ me=null; try{localStorage.removeItem('burza_dealer')}catch(e){} $('app').classList.add('hidden'); $('loginScreen').classList.remove('hidden'); }
-const isAdminUser = () => me==='ADMIN';
+const isAdminUser  = () => me==='ADMIN';
+const isLogistika  = () => me==='LOGISTIKA';
+const isDealer     = () => !!DEALERS[me];
+
+/* Čo ktorá rola vidí */
+function applyRole(){
+  const presunyVidi = isLogistika() || isAdminUser();
+  $('tab-presuny').classList.toggle('hidden', !presunyVidi);
+  ['tab-moje'].forEach(id=>$(id).classList.toggle('hidden', isLogistika()));
+  $('dealerActions').classList.toggle('hidden', isLogistika());
+}
 
 /* ---------- TABS + FILTERS ---------- */
 function setTab(t){
   tab=t;
-  ['burza','dopyt','moje'].forEach(x=>$('tab-'+x).className = x===t?'on':'');
+  ['burza','dopyt','moje','presuny'].forEach(x=>$('tab-'+x).className = (x===t?'on':'') + ($('tab-'+x).classList.contains('hidden')?' hidden':''));
   $('filters').classList.toggle('hidden', t!=='burza');
   render();
 }
@@ -479,11 +513,13 @@ function render(){
   if(!me) return;
   const mine = Object.entries(offers).filter(([,o])=>o.dealer===me).length
              + Object.entries(wants).filter(([,w])=>w.dealer===me).length;
-  const burzaCount = Object.entries(offers).filter(([,o])=>isAdminUser()||o.dealer!==me).length;
+  const burzaCount = Object.entries(offers).filter(([,o])=>o.status!=='dohodnute' && (!isDealer()||o.dealer!==me)).length;
   $('cnt-burza').textContent=burzaCount; $('cnt-dopyt').textContent=Object.keys(wants).length; $('cnt-moje').textContent=mine;
+  $('cnt-presuny').textContent=Object.keys(presuny).length;
 
   if(tab==='burza') renderBurza();
   else if(tab==='dopyt') renderDopyt();
+  else if(tab==='presuny') renderPresuny();
   else renderMoje();
 }
 
@@ -500,7 +536,7 @@ function matches(o){
 }
 
 function renderBurza(){
-  let list=Object.entries(offers).filter(([,o])=>(isAdminUser()||o.dealer!==me) && matches(o));
+  let list=Object.entries(offers).filter(([,o])=>o.status!=='dohodnute' && (!isDealer()||o.dealer!==me) && matches(o));
   list.sort((a,b)=>(b[1].createdAt||'').localeCompare(a[1].createdAt||''));
   if(!list.length){
     $('view').innerHTML=`<div class="empty"><strong>Zatiaľ tu nič nie je</strong>Buď ešte nikto nič neponúkol, alebo filtre nič nenašli. Skús zrušiť filtre — alebo pridaj svoje auto ako prvý.</div>`;
@@ -537,12 +573,14 @@ function card(id,o,mine){
   const sb=stockBadge(o.skladOd);
   const ph=o.thumb||(photos[id]&&photos[id][0]);
   const reserved=o.status==='rezervovane';
+  const dohodnute=o.status==='dohodnute';
   return `
   <article class="card" onclick="openDetail('${id}')" style="cursor:pointer">
     <div class="photo">
       ${ph?`<img src="${ph}" alt="${esc(o.model)}">`:`<span class="ph-text">${esc(o.model)}</span>`}
       <span class="pill left">${esc(o.typ)}${o.stav==='DEMO'?' · DEMO':''}</span>
-      ${reserved?`<span class="pill right b-amber" style="background:#fdf0d5;color:#a86a09">Rezervované</span>`:''}
+      ${dohodnute?`<span class="pill right" style="background:#0f7a56;color:#fff">Dohodnuté</span>`
+        :reserved?`<span class="pill right b-amber" style="background:#fdf0d5;color:#a86a09">Rezervované</span>`:''}
     </div>
     <div class="body">
       <div class="model">${esc(o.model)} <span style="font-weight:600;color:var(--muted)">${esc(o.vybava)}</span></div>
@@ -552,7 +590,7 @@ function card(id,o,mine){
     </div>
     <div class="foot">
       <div class="dealer">${mine?'Moja ponuka':esc(DEALERS[o.dealer]?.name||o.dealer)}<small>${mine?dLabel(o.dealer):esc(DEALERS[o.dealer]?.city||'')}</small></div>
-      <span class="badge ${sb.cls}">${sb.txt}</span>
+      ${dohodnute?`<span class="badge b-green">→ ${esc(DEALERS[o.preDealer]?.name||o.preDealer||'')}</span>`:`<span class="badge ${sb.cls}">${sb.txt}</span>`}
     </div>
   </article>`;
 }
@@ -592,6 +630,7 @@ function openDetail(id){
         <dt>Na sklade</dt><dd><span class="badge ${sb.cls}">${sb.txt}</span></dd>
       </dl>
       ${o.poznamka?`<div class="note-box">${esc(o.poznamka)}</div>`:''}
+      ${o.status==='dohodnute'?`<div class="note-box" style="border-left-color:var(--green)">Dohodnuté s ${esc(dLabel(o.preDealer||''))}, nahlásené na logistiku ${esc((o.dohodnuteAt||'').slice(0,10).split('-').reverse().join('.'))}.</div>`:''}
       <div class="contact-box">
         <div><div class="c-name">${esc(o.kontakt)}</div><div class="c-sub">${esc(dLabel(o.dealer))}</div></div>
         <a class="btn-call" href="tel:${esc((o.telefon||'').replace(/\s/g,''))}">Zavolať ${esc(o.telefon)}</a>
@@ -599,8 +638,9 @@ function openDetail(id){
       <p class="hint" style="font-size:12px;color:var(--muted);line-height:1.5">Dohodu si spravte priamo medzi sebou, presun vozidla potom zadajte štandardne cez DIGLAS.</p>
     `,[
       `<button class="btn-ghost" onclick="copyVin('${esc(o.vin)}')">Skopírovať VIN</button>`,
-      (mine||isAdminUser())?`<button class="btn-ghost" onclick="toggleReserved('${id}')">${o.status==='rezervovane'?'Zrušiť rezerváciu':'Označiť ako rezervované'}</button>`:'',
-      (mine||isAdminUser())?`<button class="btn-primary" onclick="removeOffer('${id}')">Stiahnuť z burzy</button>`:''
+      (mine||isAdminUser())&&o.status!=='dohodnute'?`<button class="btn-ghost" onclick="toggleReserved('${id}')">${o.status==='rezervovane'?'Zrušiť rezerváciu':'Označiť ako rezervované'}</button>`:'',
+      (mine||isAdminUser())?`<button class="btn-ghost" onclick="removeOffer('${id}')">Stiahnuť z burzy</button>`:'',
+      (mine||isAdminUser())&&o.status!=='dohodnute'?`<button class="btn-primary" onclick="openDohodnute('${id}')">Dohodnuté — nahlásiť presun</button>`:''
     ].filter(Boolean).join(''));
   });
 }
@@ -759,6 +799,169 @@ function toggleReserved(id){
   const s = offers[id].status==='rezervovane'?'aktivne':'rezervovane';
   if(DEMO){ offers[id].status=s; } else { db.ref(NODE+'/ponuka/'+id+'/status').set(s); }
   closeModal(); render(); toast(s==='rezervovane'?'Označené ako rezervované':'Rezervácia zrušená');
+}
+
+/* ============================================================
+   DOHODNUTÝ PRESUN — nahlásenie na logistiku
+   Kliknutím na „Dohodnuté" vzniká záznam v burza/presuny a odchádza
+   mail na logistiku. Iná cesta, ako presun nahlásiť, v appke nie je —
+   preto sa nedá potvrdiť výmenu bez toho, aby o nej logistika vedela.
+   ============================================================ */
+function skDateTime(iso){
+  if(!iso) return '';
+  const d=new Date(iso);
+  return d.toLocaleDateString('sk-SK')+' '+d.toLocaleTimeString('sk-SK',{hour:'2-digit',minute:'2-digit'});
+}
+
+function openDohodnute(id){
+  const o=offers[id]; if(!o) return;
+  const iny=Object.keys(DEALERS).filter(c=>c!==o.dealer)
+    .sort((a,b)=>DEALERS[a].name.localeCompare(DEALERS[b].name));
+  modal('Dohodnutý presun vozidla',`
+    <div class="note-box">${esc(o.model)} ${esc(o.vybava)} · ${esc(o.farba)}<br><span class="mono" style="font-size:12.5px">${esc(o.vin)}</span></div>
+    <div class="form-grid">
+      <div class="fld full"><label>Auto preberá</label>
+        <select id="pDealer"><option value="">Vyber dílera…</option>${iny.map(c=>`<option value="${c}">${esc(dLabel(c))} (${c})</option>`).join('')}</select></div>
+      <div class="fld full"><label>Kontaktná osoba u nich (nepovinné)</label>
+        <input id="pKontakt" maxlength="80" placeholder="Meno, prípadne telefón"></div>
+      <div class="fld full"><label>Poznámka pre logistiku (nepovinné)</label>
+        <textarea id="pPozn" maxlength="300" placeholder="Napr. dokedy to potrebujete stihnúť, kto zabezpečí dopravu…"></textarea></div>
+    </div>
+    <p style="font-size:12.5px;color:var(--muted);line-height:1.55">
+      Odoslaním sa presun nahlási na logistiku (${esc(LOGISTIKA_MENO)}) a inzerát sa stiahne z burzy.
+      <strong>Presun v DIGLASe zadávajte až po tomto kroku.</strong></p>
+  `,`<button class="btn-ghost" onclick="closeModal()">Zrušiť</button>
+     <button class="btn-primary" id="pSave" onclick="savePresun('${id}')">Nahlásiť presun</button>`);
+}
+
+function presunText(p){
+  const subject=`Burza vozidiel: ${p.model} ${p.vybava} — ${DEALERS[p.odDealer]?.name||p.odDealer} → ${DEALERS[p.preDealer]?.name||p.preDealer}`;
+  const body=[
+    'Cez Burzu vozidiel bol nahlásený dohodnutý presun vozidla medzi dílermi.','',
+    `Vozidlo:    ${p.model} ${p.typ} ${p.motor} ${p.vybava}`,
+    `Farba:      ${p.farba}, interiér ${p.interier}`,
+    `VIN:        ${p.vin}`,
+    `Stav:       ${p.stav}${p.stav==='DEMO'?' · '+p.km+' km':''}`,'',
+    `Odovzdáva:  ${dLabel(p.odDealer)} (${p.odDealer})`,
+    `            ${p.odKontakt}${p.odTelefon?', '+p.odTelefon:''}`,'',
+    `Preberá:    ${dLabel(p.preDealer)} (${p.preDealer})`,
+    p.preKontakt?`            ${p.preKontakt}`:'','',
+    p.poznamka?`Poznámka:   ${p.poznamka}`:'','',
+    `Nahlásené:  ${skDateTime(p.createdAt)}`,'',
+    'Tento mail vygenerovala Burza vozidiel O&J automaticky pri nahlásení presunu.'
+  ].filter(l=>l!=='' || true).join('\n');
+  return {subject,body};
+}
+
+function mailtoOtvor(subject,body){
+  const url=`mailto:${LOGISTIKA_MAIL}?cc=${KOPIA_MAIL}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  window.location.href=url;
+}
+
+/* Skúsi odoslať cez Apps Script; keď sa to nepodarí, otvorí predvyplnený mail. */
+async function odosliMail(p){
+  const {subject,body}=presunText(p);
+  if(DEMO) return 'odoslany';          /* v náhľade neotvárame poštového klienta */
+  if(!MAIL_ENDPOINT){ mailtoOtvor(subject,body); return 'manualne'; }
+  try{
+    const ctrl=new AbortController();
+    const t=setTimeout(()=>ctrl.abort(),8000);
+    const r=await fetch(MAIL_ENDPOINT,{
+      method:'POST', signal:ctrl.signal, redirect:'follow',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify({subject,body,to:LOGISTIKA_MAIL,cc:KOPIA_MAIL})
+    });
+    clearTimeout(t);
+    const txt=await r.text();
+    if(r.ok && txt.indexOf('"ok"')>-1) return 'odoslany';
+    throw new Error('odpoved: '+txt.slice(0,120));
+  }catch(e){
+    mailtoOtvor(subject,body);
+    return 'manualne';
+  }
+}
+
+async function savePresun(id){
+  const o=offers[id]; if(!o) return;
+  const pre=$('pDealer').value;
+  if(!pre){ toast('Vyber dílera, ktorý auto preberá'); return; }
+  const btn=$('pSave'); if(btn){ btn.disabled=true; btn.textContent='Odosielam…'; }
+  const p={
+    vin:o.vin, model:o.model, typ:o.typ, motor:o.motor, vybava:o.vybava,
+    interier:o.interier, farba:o.farba, stav:o.stav, km:o.km||0, skladOd:o.skladOd||'',
+    odDealer:o.dealer, odKontakt:o.kontakt||'', odTelefon:o.telefon||'',
+    preDealer:pre, preKontakt:$('pKontakt').value.trim(),
+    poznamka:$('pPozn').value.trim(),
+    ponukaId:id, createdAt:new Date().toISOString(), createdBy:me, mailStav:'—'
+  };
+  const pid='p'+Date.now().toString(36);
+  if(DEMO){ presuny[pid]=p; }
+  else { await db.ref(NODE+'/presuny/'+pid).set(p); }
+
+  const stav=await odosliMail(p);
+  p.mailStav=stav;
+  if(DEMO){ presuny[pid].mailStav=stav; offers[id].status='dohodnute'; offers[id].preDealer=pre; offers[id].dohodnuteAt=p.createdAt; }
+  else{
+    db.ref(NODE+'/presuny/'+pid+'/mailStav').set(stav);
+    db.ref(NODE+'/ponuka/'+id).update({status:'dohodnute', preDealer:pre, dohodnuteAt:p.createdAt});
+  }
+  closeModal(); render();
+  toast(stav==='odoslany' ? 'Presun nahlásený, mail odišiel na logistiku'
+                          : 'Presun zapísaný — dopíš a pošli otvorený mail');
+}
+
+/* ---------- PRESUNY: prehľad pre logistiku a importéra ---------- */
+function renderPresuny(){
+  const list=Object.entries(presuny).sort((a,b)=>(b[1].createdAt||'').localeCompare(a[1].createdAt||''));
+  if(!list.length){
+    $('view').innerHTML=`<div class="empty"><strong>Zatiaľ žiadne presuny</strong>Keď sa dvaja díleri dohodnú na výmene vozidla, objaví sa tu záznam — a rovnaká informácia odíde mailom.</div>`;
+    return;
+  }
+  $('view').innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+      <h2 style="font-size:14px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)">Nahlásené presuny (${list.length})</h2>
+      <button class="btn-ghost" onclick="exportPresuny()">Stiahnuť do Excelu</button>
+    </div>
+    <div class="want-list">${list.map(([id,p])=>presunRow(id,p)).join('')}</div>`;
+}
+
+function presunRow(id,p){
+  const c=colorOf(p.model,p.farba);
+  return `
+  <div class="want" style="border-left-color:var(--green)">
+    <div class="w-main">
+      <div class="w-title">${esc(dLabel(p.odDealer))} &nbsp;→&nbsp; ${esc(dLabel(p.preDealer))}</div>
+      <div class="spec"><span class="swatch" style="${swatchStyle(c)}"></span>${esc(p.model)} ${esc(p.typ)} ${esc(p.vybava)} · ${esc(p.farba)} · interiér ${esc(p.interier)}</div>
+      <div class="spec mono" style="font-size:12.5px">${esc(p.vin)}</div>
+      <div class="spec">Odovzdáva: ${esc(p.odKontakt)}${p.odTelefon?' · '+esc(p.odTelefon):''}${p.preKontakt?' &nbsp;|&nbsp; Preberá: '+esc(p.preKontakt):''}</div>
+      ${p.poznamka?`<div class="w-note">${esc(p.poznamka)}</div>`:''}
+      <div class="spec" style="font-size:12px">Nahlásené ${esc(skDateTime(p.createdAt))} · mail ${p.mailStav==='odoslany'?'odoslaný automaticky':p.mailStav==='manualne'?'odoslaný dílerom ručne':'—'}</div>
+    </div>
+    ${isAdminUser()?`<button class="btn-ghost" onclick="zmazPresun('${id}')">Zmazať</button>`:''}
+  </div>`;
+}
+
+function zmazPresun(id){
+  if(DEMO){ delete presuny[id]; } else { db.ref(NODE+'/presuny/'+id).remove(); }
+  render(); toast('Záznam zmazaný');
+}
+
+function exportPresuny(){
+  const hdr=['Nahlásené','VIN','Model','Pohon','Motor','Výbava','Interiér','Farba','Stav vozidla','km',
+             'Odovzdáva','OSK odovzdáva','Kontakt odovzdáva','Telefón','Preberá','OSK preberá','Kontakt preberá','Poznámka','Mail'];
+  const rows=Object.values(presuny)
+    .sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''))
+    .map(p=>[skDateTime(p.createdAt),p.vin,p.model,p.typ,p.motor,p.vybava,p.interier,p.farba,p.stav,p.stav==='DEMO'?p.km:0,
+             DEALERS[p.odDealer]?.name||p.odDealer,p.odDealer,p.odKontakt,p.odTelefon,
+             DEALERS[p.preDealer]?.name||p.preDealer,p.preDealer,p.preKontakt,p.poznamka,
+             p.mailStav==='odoslany'?'automaticky':p.mailStav==='manualne'?'ručne dílerom':'']);
+  const csv=[hdr,...rows].map(r=>r.map(v=>`"${String(v==null?'':v).replace(/"/g,'""')}"`).join(';')).join('\r\n');
+  const blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='Burza_presuny_'+todayISO()+'.csv';
+  a.click(); URL.revokeObjectURL(a.href);
+  toast('Súbor stiahnutý');
 }
 
 /* ---------- DOPYT ---------- */
